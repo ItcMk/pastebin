@@ -18,7 +18,12 @@ import tempfile
 import time
 import urllib.request
 
-BASE = "https://raw.githubusercontent.com/ItcMk/pastebin/main/fpfix"
+# raw.githubusercontent caches aggressively, so a freshly pushed file can be served stale
+# for several minutes. Set FPFIX_BASE to a commit-pinned URL to get an immutable, uncached
+# copy - the SHA256 check below turns a stale fetch into a clean abort rather than a bad
+# install, but pinning avoids the puzzle entirely.
+BASE = os.environ.get(
+    "FPFIX_BASE", "https://raw.githubusercontent.com/ItcMk/pastebin/main/fpfix").rstrip("/")
 APP = sys.argv[1] if len(sys.argv) > 1 else "/opt/app"
 FILES = ["main.py", "modules/mqtt.py", "modules/utils.py", "modules/spool.py",
          "modules/gps.py", "modules/L76X.py"]
