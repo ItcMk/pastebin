@@ -26,7 +26,7 @@ None of it was visible, because the publish result was never checked and the log
 
 ## Install
 
-    cd /tmp && wget -q -O i.sh https://raw.githubusercontent.com/ItcMk/pastebin/main/fpfix/install.sh && sh i.sh
+    python3 -c "import urllib.request as u;u.urlretrieve('https://raw.githubusercontent.com/ItcMk/pastebin/main/fpfix/install.py','/tmp/i.py')" && python3 /tmp/i.py
 
 Then:
 
