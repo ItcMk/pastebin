@@ -8,6 +8,7 @@ Started by: /etc/init.d/S99python
 Logs to: /var/log/python_app.log
 """
 
+import os
 import sys
 import signal
 import time
