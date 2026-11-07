@@ -20,7 +20,8 @@ import urllib.request
 
 BASE = "https://raw.githubusercontent.com/ItcMk/pastebin/main/fpfix"
 APP = sys.argv[1] if len(sys.argv) > 1 else "/opt/app"
-FILES = ["main.py", "modules/mqtt.py", "modules/utils.py", "modules/spool.py"]
+FILES = ["main.py", "modules/mqtt.py", "modules/utils.py", "modules/spool.py",
+         "modules/gps.py", "modules/L76X.py"]
 
 
 def fetch(url):
@@ -52,7 +53,7 @@ def main():
     print("Downloading from %s ..." % BASE)
     try:
         want_new = read_sums(fetch(BASE + "/SHA256SUMS"))
-        want_old = read_sums(fetch(BASE + "/EXPECTED_BEFORE"))
+        want_old = read_sums(fetch(BASE + "/ACCEPTED_BEFORE"))
     except Exception:
         print("ABORT: could not reach GitHub. Check DNS/connectivity.")
         return 1
@@ -76,9 +77,12 @@ def main():
             print("Already up to date - nothing to do.")
             return 0
 
-        drift = [(n, sha(os.path.join(APP, n))[:12], h[:12])
-                 for n, h in want_old.items()
-                 if sha(os.path.join(APP, n)) not in (h, want_new.get(n))]
+        drift = []
+        for n, h in want_old.items():
+            allowed = set(h.split(",")) | {want_new.get(n)}
+            got = sha(os.path.join(APP, n))
+            if got not in allowed:
+                drift.append((n, got[:12], h.split(",")[0][:12]))
         if drift:
             print("REFUSED - these files are not the version this patch expects:")
             for n, g, w in drift:
@@ -124,6 +128,28 @@ def main():
             open(cfg, "w", encoding="utf-8").write(src.replace(old, new, 1))
             py_compile.compile(cfg, doraise=True)
             print("  config.py updated")
+
+        # Logging block: move the real log off the tmpfs that a reboot empties, and
+        # quieten the GPS chatter so seven days of history is mostly signal.
+        src = open(cfg, encoding="utf-8").read()
+        if "LOG_TO_STDOUT" in src:
+            print("  config.py logging block already updated")
+        else:
+            old_log = 'LOGS_DIR = "/var/log"'
+            new_log = ('LOGS_DIR = os.path.join(BASE_DIR, "logs")')
+            if old_log not in src:
+                print("WARNING: config.py LOGS_DIR not as expected - left unchanged.")
+            else:
+                src = src.replace(old_log, new_log, 1)
+                src = src.replace(
+                    "LOG_BACKUP_COUNT = 7  # Keep 7 days of logs",
+                    "LOG_BACKUP_COUNT = 7  # Keep 7 days of logs\n"
+                    "LOG_TO_STDOUT = False\n"
+                    "GPS_VERBOSE = False\n"
+                    "GPS_NO_FIX_WARN_INTERVAL = 3600", 1)
+                open(cfg, "w", encoding="utf-8").write(src)
+                py_compile.compile(cfg, doraise=True)
+                print("  config.py logging block updated")
 
         for root, dirs, _ in os.walk(APP):
             for d in list(dirs):

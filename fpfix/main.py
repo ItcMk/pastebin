@@ -42,11 +42,32 @@ watchdog = None
 
 
 def setup_logger():
-    """Configure logging with rotation"""
+    """
+    Configure logging with rotation that actually keeps its history.
+
+    Two things used to defeat LOG_BACKUP_COUNT, so "7 days of logs" was never true:
+
+    1. The log was written twice. This handler wrote the file, and a StreamHandler on
+       stdout wrote the same lines again - which the init script redirected into the very
+       same file. Every line appeared twice.
+
+    2. That redirect broke rotation outright. When the handler rotates it renames
+       python_app.log to python_app.log.<date> and opens a new one, but the shell's `>>`
+       still points at the renamed inode. So stdout kept writing into the ROTATED file
+       while the handler wrote the new one, which is why the file named for yesterday
+       held the newest lines and the current file looked nearly empty.
+
+    The handler now owns its file alone. Anything a module prints to stdout still goes
+    wherever the init script points it, and is no longer mixed into the real log.
+    """
     logger = logging.getLogger(__name__)
     logger.setLevel(getattr(logging, config.LOG_LEVEL))
 
-    # Create handler with rotation
+    # The log lives on persistent storage, not on a tmpfs that a reboot empties. Seven
+    # days of history is worthless if it does not survive a restart, and a restart is
+    # exactly when you want to read it.
+    os.makedirs(os.path.dirname(config.LOG_FILE), exist_ok=True)
+
     handler = TimedRotatingFileHandler(
         config.LOG_FILE,
         when=config.LOG_ROTATION,
@@ -54,17 +75,18 @@ def setup_logger():
         backupCount=config.LOG_BACKUP_COUNT
     )
 
-    # Set format
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    # Also log to stdout (goes to /var/log/python_app.log via init script)
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
+    # Off by default; see the note above. Turn it on with LOG_TO_STDOUT only when you are
+    # watching a console, never on a device whose stdout is redirected into the log file.
+    if getattr(config, "LOG_TO_STDOUT", False):
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
     return logger
 
