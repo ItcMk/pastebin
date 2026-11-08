@@ -187,8 +187,19 @@ class Mqtt:
                 self._pending_mids[info.mid] = path
         return True
 
-    def _drain_spool(self, limit=None):
-        """Re-send everything still unacknowledged, oldest first."""
+    def _drain_spool(self, client=None, limit=None):
+        """
+        Re-send everything still unacknowledged, oldest first.
+
+        Takes the client explicitly because on_connect fires from paho's network thread
+        while __init__ is still inside setup_mqtt_client(), so self.mqtt_client may not be
+        assigned yet. Without this the first drain after a restart-with-queue - exactly
+        the case the spool exists for - logged an error and waited for the retry thread.
+        """
+        client = client or getattr(self, "mqtt_client", None)
+        if client is None:
+            self.logger.debug("Spool drain skipped: client not ready yet.")
+            return
         entries = self.spool.pending(limit=limit)
         if not entries:
             return
@@ -199,7 +210,7 @@ class Mqtt:
                 if path in self._pending_mids.values():
                     continue  # already in flight, waiting on its PUBACK
             try:
-                info = self.mqtt_client.publish(topic, payload, qos=1)
+                info = client.publish(topic, payload, qos=1)
             except Exception as e:
                 self.logger.error("Re-send of %s failed: %s", topic, e)
                 break
@@ -248,8 +259,8 @@ class Mqtt:
         # this callback runs on paho's network loop, and that loop is what delivers the
         # acknowledgements we would be waiting for.
         if self.spool.count():
-            threading.Thread(target=self._drain_spool, name="SpoolDrain",
-                             daemon=True).start()
+            threading.Thread(target=self._drain_spool, args=(client,),
+                             name="SpoolDrain", daemon=True).start()
 
     def on_message(self, client, userdata, message):
         """
